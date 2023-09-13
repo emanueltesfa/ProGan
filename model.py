@@ -47,7 +47,16 @@ class ConvBlock(nn.Module): #convolutional block 3x3 conv, pixel norm, leaky rel
 
 
 class Generator(nn.Module):
-    pass
+    def __init__(self, z_dim, in_channels, img_channels=3):
+        super.__init__()
+        self.initial = nn.Sequential(
+            nn.ConvTranspose2d(z_dim, in_channels, kernel_size=4, stride=1, padding=0),
+        )
+
+        def fade_in(self, alpha, upscaled, generated):
+            pass
+        def forward (self,x):
+            pass
 
 
 class Discriminator(nn.Module):
