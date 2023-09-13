@@ -20,15 +20,23 @@ class WSConv2d(nn.Module): #includes equalized lr
     
 
 
-class PixelNorm(nn.Module):
-    pass
+class PixelNorm(nn.Module): # normalize across RGB channels
+    def __init__(self):
+        super().__init__() #call init of parent class nn.Module (super class)
+        self.epsilon = 1e-8
+
+        def forward ( self, x ):   # x is the input tensor to the forward function
+            return x / torch.sqrt(torch.mean(x**2,  dim = 1, keepdim = True) + self.epsilon) #dim = 1 means we want to take the mean across the channels, keepdim = True means we want to keep the dimension of the mean
 
 
-class ConvBlock(nn.Module):
+class ConvBlock(nn.Module): #convolutional block 3x3 conv, pixel norm, leaky relu
     pass
+            
+
 
 class Generator(nn.Module):
     pass
+
 
 class Discriminator(nn.Module):
     pass
