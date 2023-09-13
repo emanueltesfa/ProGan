@@ -30,7 +30,19 @@ class PixelNorm(nn.Module): # normalize across RGB channels
 
 
 class ConvBlock(nn.Module): #convolutional block 3x3 conv, pixel norm, leaky relu
-    pass
+    def __init__(self, in_channels, out_channels, use_pn = True):
+        super().__init__()
+        self.conv1 = WSConv2d(in_channels, out_channels)   #conv layer 1
+        self.conv2 = WSConv2d(out_channels, out_channels)
+        self.leaky = nn.LeakyReLU(0.2)
+        self.pn = PixelNorm()
+        self.use_pn = use_pn
+
+        def forward (self, x ):
+            x = self.leaky(self.conv1(x))
+            x = self.pn(x) if self.use_pn else x #if use_pn is true, then we apply pixel norm
+            x = self.leaky(self.conv2(x))
+            return self.pn(x) if self.use_pn else x
             
 
 
