@@ -64,6 +64,7 @@ class Generator(nn.Module):
             conv_out_c = int( in_channels * factors[i+1])
             self.prog_blocks.append(ConvBlock(conv_in_c, conv_out_c)) # conv block is conv layer, pixel norm, leaky relu
             self.rgb_layers.append(WSConv2d(conv_out_c, img_channels, kernel_size=1, stride=1)) # we want to add a 1x1 conv layer to the rgb layers list
+            pass
 
         def fade_in(self, alpha, upscaled, generated):
             """
@@ -71,7 +72,7 @@ class Generator(nn.Module):
             upscaled: output of the previous block
             generated: output of the current block
             """
-            pass
+            return torch.tanh(alpha * generated + (1 - alpha) * upscaled)
 
         def forward (self,x, alpha, steps): # steps * 4 
             pass
