@@ -50,12 +50,30 @@ class Generator(nn.Module):
     def __init__(self, z_dim, in_channels, img_channels=3):
         super.__init__()
         self.initial = nn.Sequential(
-            nn.ConvTranspose2d(z_dim, in_channels, kernel_size=4, stride=1, padding=0),
+            PixelNorm(),
+            nn.ConvTranspose2d(z_dim, in_channels, kernel_size=4, stride=1, padding=1),
+            nn.LeakyReLU(0.2),
+            WSConv2d(z_dim, in_channels),
+            nn.LeakyReLU(0.2),
+            PixelNorm()
         )
+        self.initial_rbg = WSConv2d(in_channels, img_channels, kernel_size=1, stride=1) #1x1 conv layer
+        self.prog_blocks, self.rgb_layers = nn.ModuleList(), nn.ModuleList(self.inital_rbg) #list of modules, list of rgb layers
+        for i in range(len(factors) -1 ): # -1 because we dont want to include the last layer
+            conv_in_c = int( in_channels * factors[i]) # multiply in_channels by the factor to get the number of channels for the next block
+            conv_out_c = int( in_channels * factors[i+1])
+            self.prog_blocks.append(ConvBlock(conv_in_c, conv_out_c)) # conv block is conv layer, pixel norm, leaky relu
+            self.rgb_layers.append(WSConv2d(conv_out_c, img_channels, kernel_size=1, stride=1)) # we want to add a 1x1 conv layer to the rgb layers list
 
         def fade_in(self, alpha, upscaled, generated):
+            """
+            alpha: fade in factor   
+            upscaled: output of the previous block
+            generated: output of the current block
+            """
             pass
-        def forward (self,x):
+
+        def forward (self,x, alpha, steps): # steps * 4 
             pass
 
 
