@@ -1,5 +1,7 @@
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
+
 factors = [1,1,1,1,1/2,1/4,1/8,1/16, 1/32]
 
 
@@ -64,7 +66,6 @@ class Generator(nn.Module):
             conv_out_c = int( in_channels * factors[i+1])
             self.prog_blocks.append(ConvBlock(conv_in_c, conv_out_c)) # conv block is conv layer, pixel norm, leaky relu
             self.rgb_layers.append(WSConv2d(conv_out_c, img_channels, kernel_size=1, stride=1)) # we want to add a 1x1 conv layer to the rgb layers list
-            pass
 
         def fade_in(self, alpha, upscaled, generated):
             """
@@ -75,8 +76,19 @@ class Generator(nn.Module):
             return torch.tanh(alpha * generated + (1 - alpha) * upscaled)
 
         def forward (self,x, alpha, steps): # steps * 4 
-            pass
+            out = self.initial(x) # pass x through the initial block (4x4)
 
+            if steps == 0: 
+                return self.initial_rgb(out) # if steps = 0, then we return the output of the initial rgb layer
+            
+            for step in range(steps):
+                upscale = F.interpolate(out, scale_factor=2, mode="nearest") # upscale the output of the previous block
+                out = self.prog_blocks[step](upscale) # pass the upscaled output through the conv block
+            
+            final_upscale = self.rbg_layers[steps - 1](upscale)
+            final_out = self.rbg_layers[steps](out)
+
+            return self.fade_in(alpha, final_upscale, final_out)
 
 class Discriminator(nn.Module):
     pass
