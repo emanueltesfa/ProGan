@@ -1,11 +1,12 @@
 import numpy as np
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 factors = [1,1,1,1,1/2,1/4,1/8,1/16, 1/32]
 
 
-class WSConv2d(nn.Module): #includes equalized lr
+class WSConv2d(nn.Module): # single convolutional layer
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, gain=2):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -13,7 +14,7 @@ class WSConv2d(nn.Module): #includes equalized lr
         self.bias = self.conv.bias
         self.conv.bias = None #remove bias of conv layer
 
-    #initaliaize conv weights and bias
+        #initialize conv weights and bias
         nn.init.normal_(self.conv.weight)  # init weights to standard guasiann
         nn.init.zeros_(self.bias) 
 
@@ -59,8 +60,8 @@ class Generator(nn.Module):
             nn.LeakyReLU(0.2),
             PixelNorm()
         )
-        self.initial_rbg = WSConv2d(in_channels, img_channels, kernel_size=1, stride=1) #1x1 conv layer
-        self.prog_blocks, self.rgb_layers = nn.ModuleList(), nn.ModuleList(self.inital_rbg) #list of modules, list of rgb layers
+        self.initial_rgb = WSConv2d(in_channels, img_channels, kernel_size=1, stride=1) #1x1 conv layer
+        self.prog_blocks, self.rgb_layers = nn.ModuleList(), nn.ModuleList(self.inital_rgb) #list of modules, list of rgb layers
         for i in range(len(factors) -1 ): # -1 because we dont want to include the last layer
             conv_in_c = int( in_channels * factors[i]) # multiply in_channels by the factor to get the number of channels for the next block
             conv_out_c = int( in_channels * factors[i+1])
@@ -85,10 +86,75 @@ class Generator(nn.Module):
                 upscale = F.interpolate(out, scale_factor=2, mode="nearest") # upscale the output of the previous block
                 out = self.prog_blocks[step](upscale) # pass the upscaled output through the conv block
             
-            final_upscale = self.rbg_layers[steps - 1](upscale)
-            final_out = self.rbg_layers[steps](out)
+            final_upscale = self.rgb_layers[steps - 1](upscale)
+            final_out = self.rgb_layers[steps](out)
 
             return self.fade_in(alpha, final_upscale, final_out)
 
 class Discriminator(nn.Module):
-    pass
+    def __init__(self, z_dim, in_channels, img_channels=3):
+        super.__init__()
+        self.prog_blocks, self.rgb_layers = nn.ModuleList(), nn.ModuleList()   #list of modules, list of rgb layers
+        self.leaky = nn.LeaklyReLu(0.2)
+
+        for i in range( len( factors - 1 ), 0 , 1 ): 
+            conv_in_c = int( in_channels * factors[i]) # multiply in_channels by the factor to get the number of channels for the next block
+            conv_out_c = int( in_channels * factors[i -1 ] ) # multiply in_channels by the factor to get the number of channels for the next block
+            self.prog_blocks.append(ConvBlock(conv_in_c, conv_out_c, use_pn=False))
+            self.rgb_layers.append(WSConv2d(img_channels, conv_in_c, kernel_size=1, stride=1))
+        
+        self.inital_rgb = WSConv2d(img_channels, in_channels, kernel_size=1, stride=1)  
+        self.rgb_layers.append(self.initial_rgb) # add the initial rgb layer to the rgb layers list
+        self.avg_pool = nn.AvgPool2d(kernel_size=2, stride=2)   # average pooling layer
+
+        self.final_block = nn.Sequential(
+            WSConv2d(in_channels + 1 , in_channels=2, kernel_size=3, stride=1, padding=1), # 3x3 Conv,  513 in channels = in channels + 1 
+            nn.LeakyReLU(0.2),
+            WSConv2d(in_channels=2, out_channels=1, kernel_size=4, stride=1, padding=0), # 4x4 Conv 
+            nn.LeakyReLU(0.2),
+            WSConv2d(in_channels, 1, kernel_size=1, stride = 1 , padding=0) # final 1x1 conv layer
+        )
+
+    def fade_in(self, alpha ,downscaled_apool, out_conv):
+        return alpha * out_conv + (1 - alpha) * downscaled_apool
+    
+    def minibatch_std(self, x):
+        batch_stats = torch.std(x, dim=0).mean().repeat(x.shape[0], 1, x.shape[2], x.shape[3])
+        return torch.cat([x, batch_stats], dim=1) # we want to add a new channel to the input tensor that contains the standard deviation of each feature map across the batch
+
+    def forward(self, x, alpha,  steps):
+        # steps * 4 but need last index
+        cur_step = len( self.prog_blocks ) - steps 
+        out = self.leaky(self.rgb_layers[cur_step](x)) # pass x through the rgb layer of the current step and apply leaky relu to the output 
+
+
+        if steps == 0:
+            out = self.minibatch_std(out)
+            return self.final_block(out).view(out.shape[0], -1)
+        
+        downscaled = self.leaky( self.rgb_layers[cur_step + 1] ( self.avg_pool(x) ) ) # pass x through the rgb layer of the next step by downscaling x by a factor of 2 using average pooling and apply leaky relu to the output
+        out = self.prog_blocks(cur_step)(out) # pass the output of the rgb layer through the conv block of the current step
+        out = self.fade_in(alpha, downscaled, out)
+
+        for step in range( cur_step + 1, len ( self.prog_blocks) ): # inital layer done, as we go up the prog factors, make smaller to 4x4
+            out = self.prog_blocks[step](out)
+            out = self.avg_pool(out)
+        out = self.minibatch_std(out)
+        return self.final_block(out).view(out.shape[0], -1) # pass the output of the minibatch std layer through the final block and flatten the output
+
+# train code
+
+if __name__ == "__main__":
+    Z_DIM = 128
+    IN_CHANNELS = 256
+    generator = Generator(Z_DIM, IN_CHANNELS, img_channels=3)
+    discriminator = Discriminator(Z_DIM, IN_CHANNELS, img_channels=3)
+    
+    for img_size in [4, 8, 16, 32, 64, 128, 256, 512]:
+        num_steps = int(np.log2(img_size / 4))
+        x = torch.randn((1, Z_DIM, 1, 1))
+        z = generator(x, alpha=1.0, steps=num_steps)
+        assert z.shape == (1, 3, img_size, img_size)
+        out = discriminator(z, alpha=1.0, steps=num_steps)
+        assert out.shape == (1, 1)
+        print(f"Success! At img size {img_size}")
