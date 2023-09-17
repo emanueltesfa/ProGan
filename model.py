@@ -139,6 +139,7 @@ class Discriminator(nn.Module):
         for step in range( cur_step + 1, len ( self.prog_blocks) ): # inital layer done, as we go up the prog factors, make smaller to 4x4
             out = self.prog_blocks[step](out)
             out = self.avg_pool(out)
+            
         out = self.minibatch_std(out)
         return self.final_block(out).view(out.shape[0], -1) # pass the output of the minibatch std layer through the final block and flatten the output
 
